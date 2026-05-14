@@ -1,22 +1,36 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { authMiddleware } = require('../middleware/auth');
 
-// GET /api/headlines - list all with campaign/truck/neighborhood names
+router.use(authMiddleware);
+
+// GET /api/headlines - list all with campaign/truck/neighborhood names (paginated)
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT h.*,
-        c.name AS campaign_name,
-        t.name AS truck_name,
-        n.name AS neighborhood_name
-      FROM headlines h
-      LEFT JOIN campaigns c ON h.campaign_id = c.id
-      LEFT JOIN trucks t ON h.truck_id = t.id
-      LEFT JOIN neighborhoods n ON h.neighborhood_id = n.id
-      ORDER BY h.created_at DESC
-    `);
-    res.json(result.rows);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+    const [dataRes, countRes] = await Promise.all([
+      pool.query(`
+        SELECT h.*,
+          c.name AS campaign_name,
+          t.name AS truck_name,
+          n.name AS neighborhood_name
+        FROM headlines h
+        LEFT JOIN campaigns c ON h.campaign_id = c.id
+        LEFT JOIN trucks t ON h.truck_id = t.id
+        LEFT JOIN neighborhoods n ON h.neighborhood_id = n.id
+        ORDER BY h.created_at DESC
+        LIMIT $1 OFFSET $2
+      `, [limit, offset]),
+      pool.query('SELECT COUNT(*) FROM headlines')
+    ]);
+    const total = parseInt(countRes.rows[0].count);
+    res.json({
+      data: dataRes.rows,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+    });
   } catch (err) {
     console.error('Get headlines error:', err);
     res.status(500).json({ error: 'Internal server error' });

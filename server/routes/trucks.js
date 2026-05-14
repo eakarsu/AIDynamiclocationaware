@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { authMiddleware } = require('../middleware/auth');
+
+// All truck routes require auth
+router.use(authMiddleware);
 
 // GET /api/trucks - list all trucks with latest GPS location
 router.get('/', async (req, res) => {

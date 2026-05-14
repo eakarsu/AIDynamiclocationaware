@@ -2,17 +2,33 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const fetch = require('node-fetch');
+const { aiRateLimiter } = require('../middleware/rateLimiter');
+const { authMiddleware } = require('../middleware/auth');
 
-// GET /api/ai/logs - list all AI generation logs
+// All AI routes require auth
+router.use(authMiddleware);
+
+// GET /api/ai/logs - list all AI generation logs (paginated)
 router.get('/logs', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT al.*, c.name AS campaign_name
-      FROM ai_generation_logs al
-      LEFT JOIN campaigns c ON al.campaign_id = c.id
-      ORDER BY al.created_at DESC
-    `);
-    res.json(result.rows);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+    const [dataRes, countRes] = await Promise.all([
+      pool.query(`
+        SELECT al.*, c.name AS campaign_name
+        FROM ai_generation_logs al
+        LEFT JOIN campaigns c ON al.campaign_id = c.id
+        ORDER BY al.created_at DESC
+        LIMIT $1 OFFSET $2
+      `, [limit, offset]),
+      pool.query('SELECT COUNT(*) FROM ai_generation_logs')
+    ]);
+    const total = parseInt(countRes.rows[0].count);
+    res.json({
+      data: dataRes.rows,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+    });
   } catch (err) {
     console.error('Get AI logs error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -39,7 +55,7 @@ router.get('/logs/:id', async (req, res) => {
 });
 
 // POST /api/ai/generate - THE MAIN AI FEATURE
-router.post('/generate', async (req, res) => {
+router.post('/generate', aiRateLimiter, async (req, res) => {
   const startTime = Date.now();
 
   try {
@@ -93,7 +109,7 @@ router.post('/generate', async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-haiku-4.5',
+        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3-5-sonnet-20241022',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.8,
       }),
@@ -110,17 +126,30 @@ router.post('/generate', async (req, res) => {
     const tokensUsed = aiData.usage ? (aiData.usage.total_tokens || 0) : 0;
     const aiContent = aiData.choices && aiData.choices[0] ? aiData.choices[0].message.content : '';
 
-    // Try to parse JSON from AI response
+    // Try to parse JSON from AI response (robust multi-strategy parsing)
     let parsedHeadlines = [];
     try {
-      // Extract JSON array from response (handle markdown code blocks)
-      const jsonMatch = aiContent.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        parsedHeadlines = JSON.parse(jsonMatch[0]);
+      // Strategy 1: direct JSON parse
+      parsedHeadlines = JSON.parse(aiContent);
+    } catch {
+      try {
+        // Strategy 2: extract JSON from markdown code blocks (```json ... ```)
+        const codeBlockMatch = aiContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (codeBlockMatch) {
+          parsedHeadlines = JSON.parse(codeBlockMatch[1].trim());
+        } else {
+          // Strategy 3: extract raw JSON array
+          const jsonMatch = aiContent.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            parsedHeadlines = JSON.parse(jsonMatch[0]);
+          } else {
+            console.error('Could not extract JSON array from AI response');
+          }
+        }
+      } catch (parseErr) {
+        console.error('Failed to parse AI response as JSON:', parseErr.message);
+        // parsedHeadlines stays [] — raw_response still returned to caller
       }
-    } catch (parseErr) {
-      console.error('Failed to parse AI response as JSON:', parseErr.message);
-      // Return raw content if parsing fails
     }
 
     // Save to ai_generation_logs
@@ -130,7 +159,7 @@ router.post('/generate', async (req, res) => {
       [
         prompt,
         JSON.stringify(aiData),
-        process.env.OPENROUTER_MODEL || 'anthropic/claude-haiku-4.5',
+        process.env.OPENROUTER_MODEL || 'anthropic/claude-3-5-sonnet-20241022',
         tokensUsed,
         latencyMs,
         truck_id || null,

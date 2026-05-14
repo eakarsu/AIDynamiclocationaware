@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Batch 03 Features</title>
+<!-- === Batch 03 Gaps & Frontend Mounts === -->
+<style>
+body { font-family: system-ui, sans-serif; padding: 24px; background: #f8fafc; }
+.btn { padding: 6px 10px; border-radius: 4px; border: 1px solid #cbd5e1; background: #f8fafc; cursor: pointer; font-size: 12px; margin: 2px; }
+.btn.active { background: #1e40af; color: white; }
+.panel { margin-top: 16px; padding: 16px; background: white; border-radius: 6px; border: 1px solid #e2e8f0; }
+textarea { width: 100%; min-height: 80px; padding: 8px; font-family: monospace; font-size: 12px; }
+pre { background: #0b1020; color: #cbd5e1; padding: 10px; border-radius: 4px; overflow: auto; max-height: 360px; font-size: 12px; }
+.err { padding: 10px; background: #fee2e2; color: #991b1b; border-radius: 4px; font-size: 13px; }
+</style></head>
+<body>
+<h2>Batch 03 Features <small style="color:#64748b;font-weight:400">(AIDynamiclocationaware)</small></h2>
+<div id="tabs"></div>
+<div id="panel"></div>
+<script>
+const FEATURES = [{"kind": "cfs", "slug": "dynamic-pricing-engine", "label": "Dynamic pricing engine", "desc": "Cost adjusts in real time based on demand & demographics", "endpoint": "/cf-dynamic-pricing-engine"}, {"kind": "cfs", "slug": "agentic-campaign-planner", "label": "Agentic campaign planner", "desc": "NL prompt \u2192 trucks/neighbourhoods/budget selection", "endpoint": "/cf-agentic-campaign-planner"}, {"kind": "cfs", "slug": "weather-triggered-campaigns", "label": "Weather-triggered campaigns", "desc": "\"Rainy Sunday = hardware-store ads\" automation", "endpoint": "/cf-weather-triggered-campaigns"}, {"kind": "cfs", "slug": "real-time-fleet-dashboard", "label": "Real-time fleet dashboard", "desc": "Live map with impressions/engagement/cost-per-mile", "endpoint": "/cf-real-time-fleet-dashboard"}, {"kind": "cfs", "slug": "programmatic-inventory-marketplace", "label": "Programmatic inventory marketplace", "desc": "Sell unused slots Airbnb-style", "endpoint": "/cf-programmatic-inventory-marketplace"}, {"kind": "cfs", "slug": "audio-ad-generator", "label": "Audio-ad generator", "desc": "Voice-over creation for radio cross-promotion", "endpoint": "/cf-audio-ad-generator"}, {"kind": "gap-ai", "slug": "no-vision-model-competitor-billboard-analysis", "label": "No vision-model competitor-billboard analysis", "desc": "No vision-model competitor-billboard analysis", "endpoint": "/gap-no-vision-model-competitor-billboard-analysis"}, {"kind": "gap-ai", "slug": "no-weather-triggered-creative-selection", "label": "No weather-triggered creative selection", "desc": "No weather-triggered creative selection", "endpoint": "/gap-no-weather-triggered-creative-selection"}, {"kind": "gap-ai", "slug": "no-voice-audio-ad-generation-for-radio-extension", "label": "No voice/audio ad generation for radio extension", "desc": "No voice/audio ad generation for radio extension", "endpoint": "/gap-no-voice-audio-ad-generation-for-radio-extension"}, {"kind": "gap-non", "slug": "no-webhooks-no-dsp-ssp-integration-callbacks", "label": "No webhooks (no DSP/SSP integration callbacks)", "desc": "No webhooks (no DSP/SSP integration callbacks)", "endpoint": "/gap-no-webhooks-no-dsp-ssp-integration-callbacks"}, {"kind": "gap-non", "slug": "no-notification-system-no-driver-operator-alerts", "label": "No notification system (no driver/operator alerts)", "desc": "No notification system (no driver/operator alerts)", "endpoint": "/gap-no-notification-system-no-driver-operator-alerts"}, {"kind": "gap-non", "slug": "no-external-integration-no-programmatic-ooh-marketplace-con", "label": "No external integration (no programmatic-OOH marketplace con", "desc": "No external integration (no programmatic-OOH marketplace connector)", "endpoint": "/gap-no-external-integration-no-programmatic-ooh-marketplace-con"}, {"kind": "gap-non", "slug": "limited-campaign-scheduling-no-day-parting-ui-surfaced", "label": "Limited campaign scheduling (no day-parting UI surfaced)", "desc": "Limited campaign scheduling (no day-parting UI surfaced)", "endpoint": "/gap-limited-campaign-scheduling-no-day-parting-ui-surfaced"}, {"kind": "gap-non", "slug": "no-qr-sms-capture-endpoint-for-response-tracking", "label": "No QR/SMS capture endpoint for response tracking", "desc": "No QR/SMS capture endpoint for response tracking", "endpoint": "/gap-no-qr-sms-capture-endpoint-for-response-tracking"}, {"kind": "gap-non", "slug": "no-invoice-billing-module", "label": "No invoice/billing module", "desc": "No invoice/billing module", "endpoint": "/gap-no-invoice-billing-module"}, {"kind": "gap-non", "slug": "no-driver-mobile-app-endpoints", "label": "No driver mobile-app endpoints", "desc": "No driver mobile-app endpoints", "endpoint": "/gap-no-driver-mobile-app-endpoints"}];
+let active = FEATURES[0]?.slug;
+function authH() {
+  const t = localStorage.getItem('token');
+  return { 'Content-Type': 'application/json', ...(t ? { Authorization: 'Bearer ' + t } : {}) };
+}
+function render() {
+  const tabs = document.getElementById('tabs');
+  tabs.innerHTML = FEATURES.map(f => '<button class="btn ' + (f.slug===active?'active':'') + '" onclick="setActive(\'' + f.slug + '\')">' + '[' + f.kind + '] ' + f.label + '</button>').join('');
+  const cur = FEATURES.find(f => f.slug === active);
+  if (!cur) return;
+  document.getElementById('panel').innerHTML =
+    '<div class="panel"><strong>' + cur.label + '</strong><div style="color:#475569;font-size:13px">' + cur.desc + '</div>' +
+    '<div style="color:#64748b;font-size:11px;margin-top:4px">POST <code>/api' + cur.endpoint + '</code></div>' +
+    '<textarea id="inp" placeholder=\'Optional JSON {}\'></textarea>' +
+    '<div><button class="btn" onclick="run()">Run</button></div>' +
+    '<div id="out"></div></div>';
+}
+function setActive(s) { active = s; render(); }
+async function run() {
+  const cur = FEATURES.find(f => f.slug === active); if (!cur) return;
+  const out = document.getElementById('out'); out.innerHTML = 'Running...';
+  let body = {};
+  try { body = JSON.parse(document.getElementById('inp').value || '{}'); } catch { body = { input: document.getElementById('inp').value }; }
+  try {
+    const r = await fetch('/api' + cur.endpoint, { method: 'POST', headers: authH(), body: JSON.stringify(body) });
+    let data; try { data = await r.json(); } catch { data = { raw: await r.text() }; }
+    if (!r.ok) { out.innerHTML = '<div class="err">' + (data.error || ('HTTP ' + r.status)) + '</div>'; return; }
+    out.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+  } catch (e) { out.innerHTML = '<div class="err">' + e.message + '</div>'; }
+}
+render();
+</script>
+</body></html>

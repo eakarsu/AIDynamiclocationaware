@@ -3,7 +3,9 @@
    Complete SPA Application
    ============================================ */
 
-const API = 'http://localhost:4001/api';
+// Use relative API path so we can deploy behind a proxy or different host
+const API = (window.API_BASE || '') + '/api';
+const WS_URL = (window.WS_BASE || (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host) + '/ws';
 let token = localStorage.getItem('token');
 let currentUser = null;
 let currentSection = 'dashboard';
@@ -19,8 +21,12 @@ async function api(endpoint, method = 'GET', body = null) {
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${API}${endpoint}`, opts);
   if (res.status === 401) { logout(); throw new Error('Session expired'); }
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || data.message || 'Request failed');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const e = new Error(data.error || data.message || 'Request failed');
+    e.status = res.status;
+    throw e;
+  }
   return data;
 }
 
@@ -85,7 +91,11 @@ function navigate(section, id = null) {
   const titles = {
     dashboard: 'Dashboard', trucks: 'Trucks', gps: 'GPS Tracking', neighborhoods: 'Neighborhoods',
     campaigns: 'Campaigns', headlines: 'Headlines', billboard: 'Billboard Display', analytics: 'Analytics',
-    demographics: 'Demographics', 'ai-generator': 'AI Generator', 'ai-logs': 'AI Logs'
+    demographics: 'Demographics', 'ai-generator': 'AI Generator', 'ai-logs': 'AI Logs',
+    geofences: 'Geofences', 'brand-safety': 'Brand Safety', 'weather-aware': 'Weather Headlines',
+    heatmap: 'Heatmap', 'live-billboard': 'Live Billboard',
+    'budget-allocate': 'Budget Allocator', 'demand-forecast': 'Demand Forecast',
+    'dynamic-pricing': 'Dynamic Pricing',
   };
   document.getElementById('topbar-title').textContent = titles[section] || section;
   const content = document.getElementById('content');
@@ -103,6 +113,14 @@ function navigate(section, id = null) {
     demographics: id ? () => renderDemographicDetail(id) : renderDemographicsList,
     'ai-generator': renderAiGenerator,
     'ai-logs': id ? () => renderAiLogDetail(id) : renderAiLogsList,
+    geofences: renderGeofences,
+    'brand-safety': renderBrandSafety,
+    'weather-aware': renderWeatherAware,
+    heatmap: renderHeatmap,
+    'live-billboard': renderLiveBillboard,
+    'budget-allocate': renderBudgetAllocate,
+    'demand-forecast': renderDemandForecast,
+    'dynamic-pricing': renderDynamicPricing,
   };
 
   const render = renderers[section];
@@ -1261,7 +1279,111 @@ async function renderAiGenerator() {
       </button>
     </div></div>
     <div id="ai-results"></div>
+
+    <div class="section-header" style="margin-top:32px">
+      <h2>Route Performance Predictor (NEW)</h2>
+    </div>
+    <div class="card mb-6"><div class="card-body">
+      <p class="text-secondary" style="margin-bottom:12px">Pick a campaign and one or more neighborhoods. AI predicts impressions, CTR, and conversions per stop.</p>
+      <div class="ai-form-grid">
+        <div class="form-group">
+          <label>Campaign</label>
+          <select id="rpp-campaign">
+            <option value="">-- Select Campaign --</option>
+            ${campaigns.map(c => `<option value="${c.id}">${escapeHtml(c.name || c.campaign_name || 'Campaign #' + c.id)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Hours per neighborhood</label>
+          <input type="number" id="rpp-hours" value="2" min="1" max="12" />
+        </div>
+        <div class="form-group">
+          <label>Day Part</label>
+          <select id="rpp-daypart">
+            <option value="morning">Morning</option>
+            <option value="mid-day" selected>Mid-day</option>
+            <option value="evening">Evening</option>
+            <option value="late-night">Late-night</option>
+          </select>
+        </div>
+        <div class="form-group full-width">
+          <label>Neighborhoods (Ctrl/Cmd-click to multi-select)</label>
+          <select id="rpp-neighborhoods" multiple size="6" style="height:auto">
+            ${neighborhoods.map(n => `<option value="${n.id}">${escapeHtml(n.name || n.neighborhood_name || 'Area #' + n.id)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="rpp-btn" onclick="runRoutePerformance()">
+        <span class="material-icons">trending_up</span> Predict Performance
+      </button>
+    </div></div>
+    <div id="rpp-results"></div>
   `;
+}
+
+async function runRoutePerformance() {
+  const btn = document.getElementById('rpp-btn');
+  const resultsDiv = document.getElementById('rpp-results');
+  const campaign_id = parseInt(document.getElementById('rpp-campaign').value) || null;
+  const hours_per_neighborhood = parseInt(document.getElementById('rpp-hours').value) || 2;
+  const day_part = document.getElementById('rpp-daypart').value;
+  const sel = document.getElementById('rpp-neighborhoods');
+  const neighborhood_ids = Array.from(sel.selectedOptions).map(o => parseInt(o.value)).filter(Boolean);
+
+  if (!campaign_id || neighborhood_ids.length === 0) {
+    showToast('Pick a campaign and at least one neighborhood', 'warning');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner spinner-sm"></div> Predicting...';
+  resultsDiv.innerHTML = showLoading();
+
+  try {
+    const res = await api('/ai/route-performance-predictor', 'POST', {
+      campaign_id, neighborhood_ids, hours_per_neighborhood, day_part,
+    });
+    const p = res.predictions || {};
+    const totals = p.totals || {};
+    const rows = (p.per_neighborhood || []).map(n => `
+      <tr>
+        <td>${escapeHtml(n.neighborhood_name)}</td>
+        <td>${formatNumber(n.expected_impressions)}</td>
+        <td>${(n.expected_ctr_pct ?? 0).toFixed(2)}%</td>
+        <td>${formatNumber(n.expected_conversions)}</td>
+        <td>${escapeHtml(n.confidence || '-')}</td>
+        <td class="text-secondary">${escapeHtml(n.rationale || '')}</td>
+      </tr>`).join('');
+    resultsDiv.innerHTML = `
+      <h3 class="mb-4">Predicted Performance</h3>
+      <div class="card mb-4"><div class="card-body">
+        <div class="ai-meta">
+          <div class="ai-meta-item"><span class="material-icons">visibility</span><span>Total Impressions: <b>${formatNumber(totals.expected_impressions)}</b></span></div>
+          <div class="ai-meta-item"><span class="material-icons">touch_app</span><span>Avg CTR: <b>${(totals.expected_ctr_pct ?? 0).toFixed(2)}%</b></span></div>
+          <div class="ai-meta-item"><span class="material-icons">shopping_cart</span><span>Conversions: <b>${formatNumber(totals.expected_conversions)}</b></span></div>
+          <div class="ai-meta-item"><span class="material-icons">timer</span><span>Latency: ${res.latency_ms}ms</span></div>
+        </div>
+      </div></div>
+      <div class="card"><div class="card-body" style="overflow:auto">
+        <table class="table">
+          <thead><tr>
+            <th>Neighborhood</th><th>Impressions</th><th>CTR</th><th>Conversions</th><th>Confidence</th><th>Rationale</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${(p.recommended_optimizations || []).length ? `
+          <h4 style="margin-top:16px">Recommended Optimizations</h4>
+          <ul>${(p.recommended_optimizations || []).map(o => `<li>${escapeHtml(o)}</li>`).join('')}</ul>` : ''}
+      </div></div>
+    `;
+    showToast('Performance prediction generated', 'success');
+  } catch (err) {
+    resultsDiv.innerHTML = `<div class="card"><div class="card-body">${emptyState('error', 'Prediction Failed', err.message)}</div></div>`;
+    showToast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="material-icons">trending_up</span> Predict Performance';
+  }
 }
 
 async function generateHeadlines() {
@@ -1438,6 +1560,533 @@ async function deleteAiLog(id) {
     showToast('AI log deleted', 'success');
     navigate('ai-logs');
   });
+}
+
+// ============ FORGOT / CHANGE PASSWORD ============
+
+function showForgotPassword() {
+  renderModal('Forgot Password',
+    `<form id="forgot-form" onsubmit="event.preventDefault();">
+      <p style="margin-bottom:1rem;font-size:0.9rem;color:var(--text-muted,#6b7280);">Enter your email and we will issue a reset token (in dev, returned in the response).</p>
+      <div class="form-group"><label>Email</label><input type="email" id="forgot-email" required></div>
+      <div id="forgot-result" style="display:none;margin-top:1rem;padding:0.75rem;background:#f3f4f6;border-radius:6px;font-family:monospace;font-size:0.85rem;word-break:break-all;"></div>
+    </form>`,
+    async () => {
+      const email = document.getElementById('forgot-email').value;
+      const r = await api('/auth/forgot-password', 'POST', { email });
+      if (r.reset_token) {
+        const out = document.getElementById('forgot-result');
+        out.style.display = 'block';
+        out.innerHTML = '<strong>Reset token (copy):</strong><br>' + r.reset_token + '<br><br>Use it on the reset password page.';
+        showToast('Reset token generated', 'success');
+        // Auto-show reset modal next
+        setTimeout(() => showResetPassword(r.reset_token), 1500);
+        throw new Error('keep-modal'); // prevents close
+      } else {
+        showToast(r.message || 'Done', 'success');
+      }
+    }, 'Send Reset');
+}
+
+function showResetPassword(prefilledToken = '') {
+  renderModal('Reset Password',
+    `<form id="reset-form" onsubmit="event.preventDefault();">
+      <div class="form-group"><label>Reset Token</label><input type="text" id="reset-token" value="${escapeHtml(prefilledToken)}" required></div>
+      <div class="form-group"><label>New Password (min 6 chars)</label><input type="password" id="reset-pw" minlength="6" required></div>
+    </form>`,
+    async () => {
+      const token = document.getElementById('reset-token').value;
+      const new_password = document.getElementById('reset-pw').value;
+      await api('/auth/reset-password', 'POST', { token, new_password });
+      showToast('Password reset successful. Please sign in.', 'success');
+    }, 'Reset Password');
+}
+
+function showChangePassword() {
+  renderModal('Change Password',
+    `<form id="cp-form" onsubmit="event.preventDefault();">
+      <div class="form-group"><label>Current Password</label><input type="password" id="cp-cur" required></div>
+      <div class="form-group"><label>New Password (min 6 chars)</label><input type="password" id="cp-new" minlength="6" required></div>
+    </form>`,
+    async () => {
+      const current_password = document.getElementById('cp-cur').value;
+      const new_password = document.getElementById('cp-new').value;
+      await api('/auth/change-password', 'POST', { current_password, new_password });
+      showToast('Password updated', 'success');
+    }, 'Update Password');
+}
+
+// ============ GEOFENCES ============
+
+async function renderGeofences() {
+  const content = document.getElementById('content');
+  try {
+    const [g, n] = await Promise.all([api('/geofences'), api('/neighborhoods')]);
+    const items = (g.data || g) || [];
+    const neighborhoods = (n.data || n) || [];
+    content.innerHTML = `
+      <div class="section-header">
+        <h2>Geofences (${items.length})</h2>
+        <button class="btn btn-primary" onclick="showGeofenceForm(null, ${JSON.stringify(neighborhoods).replace(/"/g, '&quot;')})">
+          <span class="material-icons">add</span> New Geofence
+        </button>
+      </div>
+      <div class="card"><div class="card-body">
+        ${items.length === 0 ? emptyState('my_location', 'No geofences', 'Create a geofence to auto-trigger headlines when trucks enter a zone.') : `
+        <table class="data-table"><thead><tr>
+          <th>ID</th><th>Name</th><th>Neighborhood</th><th>Center</th><th>Radius (m)</th><th>Auto-Gen</th><th>Last Triggered</th><th></th>
+        </tr></thead><tbody>
+          ${items.map(it => `<tr>
+            <td>${it.id}</td>
+            <td>${escapeHtml(it.name || '-')}</td>
+            <td>${escapeHtml(it.neighborhood_name || '-')}</td>
+            <td>${it.center_latitude}, ${it.center_longitude}</td>
+            <td>${it.radius_meters}</td>
+            <td>${it.auto_generate ? 'Yes' : 'No'}</td>
+            <td>${formatDate(it.last_triggered_at)}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteGeofence(${it.id})">Delete</button></td>
+          </tr>`).join('')}
+        </tbody></table>`}
+      </div></div>`;
+  } catch (err) { content.innerHTML = emptyState('error', 'Error', err.message); }
+}
+
+function showGeofenceForm(_id, neighborhoods) {
+  const opts = (neighborhoods || []).map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('');
+  renderModal('New Geofence',
+    `<form id="gf-form" onsubmit="event.preventDefault();">
+      <div class="form-group"><label>Name</label><input id="gf-name" type="text"></div>
+      <div class="form-group"><label>Neighborhood</label><select id="gf-nb" required>${opts}</select></div>
+      <div class="form-group"><label>Center Latitude</label><input id="gf-lat" type="number" step="0.000001" required></div>
+      <div class="form-group"><label>Center Longitude</label><input id="gf-lng" type="number" step="0.000001" required></div>
+      <div class="form-group"><label>Radius (meters)</label><input id="gf-rad" type="number" value="500"></div>
+      <div class="form-group"><label><input id="gf-auto" type="checkbox" checked> Auto-generate AI on entry</label></div>
+    </form>`,
+    async () => {
+      await api('/geofences', 'POST', {
+        neighborhood_id: parseInt(document.getElementById('gf-nb').value),
+        name: document.getElementById('gf-name').value,
+        center_latitude: parseFloat(document.getElementById('gf-lat').value),
+        center_longitude: parseFloat(document.getElementById('gf-lng').value),
+        radius_meters: parseInt(document.getElementById('gf-rad').value) || 500,
+        auto_generate: document.getElementById('gf-auto').checked,
+      });
+      showToast('Geofence created', 'success');
+      navigate('geofences');
+    }, 'Save');
+}
+
+async function deleteGeofence(id) {
+  confirmAction('Delete this geofence?', async () => {
+    await api(`/geofences/${id}`, 'DELETE');
+    showToast('Geofence deleted', 'success');
+    navigate('geofences');
+  });
+}
+
+// ============ BRAND SAFETY ============
+
+async function renderBrandSafety() {
+  const content = document.getElementById('content');
+  try {
+    const [headlinesRes, scoresRes] = await Promise.all([
+      api('/headlines'),
+      api('/ai-extra/brand-safety/scores').catch(() => ({ data: [] })),
+    ]);
+    const headlines = (headlinesRes.data || headlinesRes) || [];
+    const scores = (scoresRes.data || scoresRes) || [];
+    content.innerHTML = `
+      <div class="section-header">
+        <h2>Brand Safety</h2>
+      </div>
+      <div class="card"><div class="card-header"><h3>Run Classifier</h3></div><div class="card-body">
+        <form id="bs-form" onsubmit="event.preventDefault();">
+          <div class="form-group"><label>Headline (or paste text)</label>
+            <select id="bs-headline" onchange="document.getElementById('bs-text').value = this.options[this.selectedIndex].dataset.text || ''">
+              <option value="">-- Select existing headline --</option>
+              ${headlines.map(h => `<option value="${h.id}" data-text="${escapeHtml(h.headline_text)}">${escapeHtml((h.headline_text || '').slice(0,80))}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group"><label>Headline text</label><textarea id="bs-text" rows="3" required></textarea></div>
+          <button type="submit" class="btn btn-primary" onclick="runBrandSafety()"><span class="material-icons">verified_user</span> Evaluate</button>
+        </form>
+        <div id="bs-result" style="margin-top:1rem;"></div>
+      </div></div>
+      <div class="card mt-6"><div class="card-header"><h3>Recent Scores</h3></div><div class="card-body">
+        ${scores.length === 0 ? '<p class="text-muted">No evaluations yet.</p>' : `
+        <table class="data-table"><thead><tr>
+          <th>ID</th><th>Headline</th><th>Score</th><th>Risk</th><th>When</th>
+        </tr></thead><tbody>
+          ${scores.map(s => `<tr>
+            <td>${s.id}</td>
+            <td>${escapeHtml((s.headline_text || '').slice(0, 60))}</td>
+            <td>${s.overall_score ?? '-'}</td>
+            <td>${statusBadge(s.risk_level)}</td>
+            <td>${formatDate(s.created_at)}</td>
+          </tr>`).join('')}
+        </tbody></table>`}
+      </div></div>`;
+  } catch (err) { content.innerHTML = emptyState('error', 'Error', err.message); }
+}
+
+async function runBrandSafety() {
+  const sel = document.getElementById('bs-headline');
+  const headline_id = sel && sel.value ? parseInt(sel.value) : null;
+  const headline_text = document.getElementById('bs-text').value;
+  if (!headline_text) { showToast('Provide headline text', 'error'); return; }
+  const out = document.getElementById('bs-result');
+  out.innerHTML = '<div class="spinner"></div>';
+  try {
+    const r = await api('/ai-extra/brand-safety', 'POST', headline_id ? { headline_id } : { headline_text });
+    const ev = r.evaluation || {};
+    const risk = ev.risk_level || '-';
+    const issues = (ev.issues || []).map(i => `<li><strong>${escapeHtml(i.severity || '')}:</strong> ${escapeHtml(i.violation || '')}</li>`).join('');
+    const recs = (ev.recommended_changes || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+    out.innerHTML = `
+      <div class="card"><div class="card-body">
+        <h4>Score: ${ev.overall_score || '-'} / 100</h4>
+        <p>Risk: ${statusBadge(risk)} &nbsp; Passed: ${ev.passed ? 'Yes' : 'No'}</p>
+        <p><strong>Rationale:</strong> ${escapeHtml(ev.rationale || '-')}</p>
+        ${issues ? `<h5>Issues</h5><ul>${issues}</ul>` : ''}
+        ${recs ? `<h5>Recommended changes</h5><ul>${recs}</ul>` : ''}
+      </div></div>`;
+    showToast('Evaluation complete', 'success');
+  } catch (err) {
+    out.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ============ WEATHER-AWARE ============
+
+async function renderWeatherAware() {
+  const content = document.getElementById('content');
+  try {
+    const [n, c] = await Promise.all([api('/neighborhoods'), api('/campaigns')]);
+    const neighborhoods = (n.data || n) || [];
+    const campaigns = (c.data || c) || [];
+    content.innerHTML = `
+      <div class="section-header"><h2>Weather/Event-Aware Headlines</h2></div>
+      <div class="card"><div class="card-body">
+        <form id="wa-form" onsubmit="event.preventDefault();">
+          <div class="form-group"><label>Neighborhood</label>
+            <select id="wa-nb" required>${neighborhoods.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Campaign</label>
+            <select id="wa-c" required>${campaigns.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Local Event (optional)</label><input id="wa-evt" placeholder="e.g. street fair tonight"></div>
+          <button type="submit" class="btn btn-primary" onclick="runWeatherAware()"><span class="material-icons">cloud</span> Generate</button>
+        </form>
+        <div id="wa-result" style="margin-top:1rem;"></div>
+      </div></div>`;
+  } catch (err) { content.innerHTML = emptyState('error', 'Error', err.message); }
+}
+
+async function runWeatherAware() {
+  const out = document.getElementById('wa-result');
+  out.innerHTML = '<div class="spinner"></div>';
+  try {
+    const r = await api('/ai-extra/weather-aware', 'POST', {
+      neighborhood_id: parseInt(document.getElementById('wa-nb').value),
+      campaign_id: parseInt(document.getElementById('wa-c').value),
+      event: document.getElementById('wa-evt').value || undefined,
+    });
+    const heads = (r.headlines || []).map(h => `<li><strong>${escapeHtml(h.headline)}</strong><br><small>${escapeHtml(h.weather_hook || '')} (urgency: ${escapeHtml(h.urgency || '')})</small></li>`).join('');
+    out.innerHTML = `
+      <div class="card"><div class="card-body">
+        <p><strong>Weather:</strong> ${escapeHtml(r.weather || '-')}</p>
+        <ul>${heads}</ul>
+      </div></div>`;
+    showToast('Generated', 'success');
+  } catch (err) {
+    out.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ============ HEATMAP ============
+
+async function renderHeatmap() {
+  const content = document.getElementById('content');
+  try {
+    const r = await api('/ai-extra/heatmap');
+    const points = r.points || [];
+    if (points.length === 0) {
+      content.innerHTML = emptyState('grid_on', 'No data yet', 'Add neighborhoods and analytics to see the heatmap.');
+      return;
+    }
+    const max = Math.max(...points.map(p => p.impressions || 0)) || 1;
+    content.innerHTML = `
+      <div class="section-header"><h2>Impressions x Demographics Heatmap</h2></div>
+      <div class="card"><div class="card-body">
+        <p class="text-muted">Color intensity = impressions weighted by neighborhood income (proxy for ROI).</p>
+        <table class="data-table"><thead><tr>
+          <th>Neighborhood</th><th>Lat/Lng</th><th>Impressions</th><th>Median Income</th><th>Median Age</th><th>Heat</th>
+        </tr></thead><tbody>
+          ${points.map(p => {
+            const intensity = Math.round((p.intensity || 0) * 100);
+            const bg = `rgba(239, 68, 68, ${(p.intensity || 0).toFixed(2)})`;
+            return `<tr>
+              <td>${escapeHtml(p.name)}</td>
+              <td>${p.lat ?? '-'}, ${p.lng ?? '-'}</td>
+              <td>${formatNumber(p.impressions)}</td>
+              <td>${p.median_income ? '$' + formatNumber(p.median_income) : '-'}</td>
+              <td>${p.median_age || '-'}</td>
+              <td><div style="height:24px;background:${bg};border-radius:4px;text-align:center;font-size:0.75rem;color:#fff;line-height:24px;">${intensity}%</div></td>
+            </tr>`;
+          }).join('')}
+        </tbody></table>
+      </div></div>`;
+  } catch (err) { content.innerHTML = emptyState('error', 'Error', err.message); }
+}
+
+// ============ LIVE BILLBOARD (WebSocket) ============
+
+let liveSocket = null;
+const liveLog = [];
+
+function renderLiveBillboard() {
+  const content = document.getElementById('content');
+  content.innerHTML = `
+    <div class="section-header"><h2>Live Billboard Stream</h2></div>
+    <div class="card"><div class="card-body">
+      <div style="display:flex;gap:1rem;align-items:center;margin-bottom:1rem;">
+        <input id="lb-truck" type="number" placeholder="Truck ID to subscribe" style="max-width:200px;">
+        <button class="btn btn-primary" onclick="liveSubscribe()">Subscribe</button>
+        <button class="btn btn-outline" onclick="liveDisconnect()">Disconnect</button>
+        <span id="lb-status" class="badge">Disconnected</span>
+      </div>
+      <div style="margin-bottom:1rem;display:flex;gap:0.5rem;align-items:center;">
+        <input id="lb-dispatch-truck" type="number" placeholder="Truck ID for dispatch" style="max-width:200px;">
+        <input id="lb-dispatch-headline" type="number" placeholder="Headline ID (optional)" style="max-width:200px;">
+        <button class="btn btn-success" onclick="liveDispatch()"><span class="material-icons">live_tv</span> Dispatch Best Headline</button>
+      </div>
+      <div id="lb-log" style="background:#0a0a0a;color:#0f0;padding:1rem;border-radius:6px;height:400px;overflow:auto;font-family:monospace;font-size:0.85rem;"></div>
+    </div></div>`;
+}
+
+function liveSubscribe() {
+  const truckId = document.getElementById('lb-truck').value;
+  if (liveSocket) { try { liveSocket.close(); } catch {} liveSocket = null; }
+  try {
+    liveSocket = new WebSocket(WS_URL);
+  } catch (e) {
+    showToast('WS connect failed: ' + e.message, 'error'); return;
+  }
+  liveSocket.onopen = () => {
+    document.getElementById('lb-status').textContent = 'Connected';
+    document.getElementById('lb-status').className = 'badge badge-active';
+    if (truckId) liveSocket.send(JSON.stringify({ action: 'subscribe', channel: `truck:${truckId}` }));
+    liveSocket.send(JSON.stringify({ action: 'subscribe', channel: 'all' }));
+    appendLive(`[connected] subscribed to truck:${truckId || 'all'}`);
+  };
+  liveSocket.onmessage = (ev) => {
+    try { appendLive(ev.data); } catch {}
+  };
+  liveSocket.onclose = () => {
+    document.getElementById('lb-status').textContent = 'Disconnected';
+    document.getElementById('lb-status').className = 'badge';
+    appendLive('[disconnected]');
+  };
+  liveSocket.onerror = (e) => { appendLive('[error] ' + (e.message || 'ws error')); };
+}
+
+function liveDisconnect() {
+  if (liveSocket) { try { liveSocket.close(); } catch {} liveSocket = null; }
+}
+
+async function liveDispatch() {
+  const truck_id = parseInt(document.getElementById('lb-dispatch-truck').value);
+  const hid = document.getElementById('lb-dispatch-headline').value;
+  const headline_id = hid ? parseInt(hid) : undefined;
+  if (!truck_id) { showToast('truck_id required', 'error'); return; }
+  try {
+    const r = await api('/ai-extra/live-dispatch', 'POST', { truck_id, headline_id });
+    showToast('Dispatched headline #' + (r.headline?.id || ''), 'success');
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function appendLive(text) {
+  const el = document.getElementById('lb-log');
+  if (!el) return;
+  const line = document.createElement('div');
+  line.textContent = `${new Date().toLocaleTimeString()} ${text}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+  liveLog.push(text);
+  if (liveLog.length > 500) liveLog.splice(0, liveLog.length - 500);
+}
+
+// ============ BUDGET ALLOCATE ============
+
+async function renderBudgetAllocate() {
+  const content = document.getElementById('content');
+  try {
+    const [c, n] = await Promise.all([api('/campaigns'), api('/neighborhoods')]);
+    const campaigns = (c.data || c) || [];
+    const neighborhoods = (n.data || n) || [];
+    content.innerHTML = `
+      <div class="section-header"><h2>AI Budget Allocator</h2></div>
+      <div class="card"><div class="card-body">
+        <form id="ba-form" onsubmit="event.preventDefault(); runBudgetAllocate();">
+          <div class="form-group"><label>Campaign (optional)</label>
+            <select id="ba-c"><option value="">-- none --</option>${campaigns.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Total Budget (USD)</label>
+            <input type="number" id="ba-total" min="1" step="1" value="10000" required></div>
+          <div class="form-group"><label>Limit Neighborhoods (optional, comma-sep IDs)</label>
+            <input id="ba-nbs" placeholder="e.g. 1,2,3"></div>
+          <button type="submit" class="btn btn-primary"><span class="material-icons">payments</span> Allocate</button>
+        </form>
+        <div id="ba-result" style="margin-top:1rem;"></div>
+        <p class="text-muted" style="margin-top:0.5rem;font-size:0.85rem;">Available neighborhoods: ${neighborhoods.length}</p>
+      </div></div>`;
+  } catch (err) { content.innerHTML = emptyState('error', 'Error', err.message); }
+}
+
+async function runBudgetAllocate() {
+  const out = document.getElementById('ba-result');
+  out.innerHTML = '<div class="spinner"></div>';
+  try {
+    const cid = document.getElementById('ba-c').value;
+    const total = parseFloat(document.getElementById('ba-total').value);
+    const ids = (document.getElementById('ba-nbs').value || '')
+      .split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    const body = { total_budget: total };
+    if (cid) body.campaign_id = parseInt(cid);
+    if (ids.length > 0) body.neighborhood_ids = ids;
+    const r = await api('/ai/budget-allocate', 'POST', body);
+    const a = r.allocation || {};
+    const rows = (a.per_neighborhood || []).map(p => `<tr>
+      <td>${p.neighborhood_id}</td><td>${escapeHtml(p.neighborhood_name || '')}</td>
+      <td>$${formatNumber(p.allocated_usd || 0)}</td><td>${(p.share_pct || 0).toFixed(1)}%</td>
+      <td>${escapeHtml(p.rationale || '')}</td>
+    </tr>`).join('');
+    out.innerHTML = `
+      <div class="card"><div class="card-body">
+        <p><strong>Strategy:</strong> ${escapeHtml(a.strategy_summary || '-')}</p>
+        <p><strong>Totals:</strong> Allocated $${formatNumber((a.totals || {}).allocated_usd || 0)} / Unallocated $${formatNumber((a.totals || {}).unallocated_usd || 0)}</p>
+        <table class="data-table"><thead><tr><th>NB ID</th><th>Name</th><th>Allocated</th><th>Share</th><th>Rationale</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5">No allocation</td></tr>'}</tbody></table>
+      </div></div>`;
+    showToast('Allocation generated', 'success');
+  } catch (err) {
+    if (err.status === 503) {
+      out.innerHTML = `<div class="alert alert-error">AI service is unavailable (missing OPENROUTER_API_KEY).</div>`;
+    } else {
+      out.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+    }
+  }
+}
+
+// ============ DEMAND FORECAST ============
+
+async function renderDemandForecast() {
+  const content = document.getElementById('content');
+  try {
+    const n = await api('/neighborhoods');
+    const neighborhoods = (n.data || n) || [];
+    content.innerHTML = `
+      <div class="section-header"><h2>AI Demand Forecast</h2></div>
+      <div class="card"><div class="card-body">
+        <form id="df-form" onsubmit="event.preventDefault(); runDemandForecast();">
+          <div class="form-group"><label>Neighborhood (optional)</label>
+            <select id="df-nb"><option value="">-- all (sample) --</option>${neighborhoods.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Horizon (hours)</label>
+            <input type="number" id="df-h" min="1" max="168" value="24"></div>
+          <button type="submit" class="btn btn-primary"><span class="material-icons">trending_up</span> Forecast</button>
+        </form>
+        <div id="df-result" style="margin-top:1rem;"></div>
+      </div></div>`;
+  } catch (err) { content.innerHTML = emptyState('error', 'Error', err.message); }
+}
+
+async function runDemandForecast() {
+  const out = document.getElementById('df-result');
+  out.innerHTML = '<div class="spinner"></div>';
+  try {
+    const nb = document.getElementById('df-nb').value;
+    const h = parseInt(document.getElementById('df-h').value) || 24;
+    const body = { horizon_hours: h };
+    if (nb) body.neighborhood_id = parseInt(nb);
+    const r = await api('/ai/demand-forecast', 'POST', body);
+    const f = r.forecast || {};
+    const rows = (f.per_neighborhood || []).map(p => `<tr>
+      <td>${p.neighborhood_id}</td><td>${escapeHtml(p.neighborhood_name || '')}</td>
+      <td>${p.expected_traffic_index ?? '-'}</td>
+      <td>${formatNumber(p.expected_impressions || 0)}</td>
+      <td>${escapeHtml(p.peak_window || '')}</td>
+      <td>${escapeHtml(p.confidence || '')}</td>
+    </tr>`).join('');
+    out.innerHTML = `
+      <div class="card"><div class="card-body">
+        <p><strong>Horizon:</strong> ${f.horizon_hours || h}h</p>
+        <p><strong>Notes:</strong> ${escapeHtml(f.global_notes || '-')}</p>
+        <table class="data-table"><thead><tr><th>NB ID</th><th>Name</th><th>Traffic Idx</th><th>Impressions</th><th>Peak</th><th>Conf.</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6">No forecast</td></tr>'}</tbody></table>
+      </div></div>`;
+    showToast('Forecast generated', 'success');
+  } catch (err) {
+    if (err.status === 503) {
+      out.innerHTML = `<div class="alert alert-error">AI service is unavailable (missing OPENROUTER_API_KEY).</div>`;
+    } else {
+      out.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+    }
+  }
+}
+
+// ============ DYNAMIC PRICING ============
+
+async function renderDynamicPricing() {
+  const content = document.getElementById('content');
+  try {
+    const [c, n] = await Promise.all([api('/campaigns'), api('/neighborhoods')]);
+    const campaigns = (c.data || c) || [];
+    const neighborhoods = (n.data || n) || [];
+    content.innerHTML = `
+      <div class="section-header"><h2>AI Dynamic Pricing</h2></div>
+      <div class="card"><div class="card-body">
+        <form id="dp-form" onsubmit="event.preventDefault(); runDynamicPricing();">
+          <div class="form-group"><label>Campaign (optional)</label>
+            <select id="dp-c"><option value="">-- none --</option>${campaigns.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Neighborhood (optional)</label>
+            <select id="dp-nb"><option value="">-- none --</option>${neighborhoods.map(n => `<option value="${n.id}">${escapeHtml(n.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Base CPM (USD)</label>
+            <input type="number" id="dp-base" min="0.01" step="0.01" value="5.00"></div>
+          <div class="form-group"><label>Time Window</label>
+            <input id="dp-tw" placeholder="e.g. Fri 17:00-20:00"></div>
+          <button type="submit" class="btn btn-primary"><span class="material-icons">price_change</span> Recommend</button>
+        </form>
+        <div id="dp-result" style="margin-top:1rem;"></div>
+      </div></div>`;
+  } catch (err) { content.innerHTML = emptyState('error', 'Error', err.message); }
+}
+
+async function runDynamicPricing() {
+  const out = document.getElementById('dp-result');
+  out.innerHTML = '<div class="spinner"></div>';
+  try {
+    const cid = document.getElementById('dp-c').value;
+    const nb = document.getElementById('dp-nb').value;
+    const base = parseFloat(document.getElementById('dp-base').value) || 5.0;
+    const tw = document.getElementById('dp-tw').value || '';
+    const body = { base_cpm: base, time_window: tw };
+    if (cid) body.campaign_id = parseInt(cid);
+    if (nb) body.neighborhood_id = parseInt(nb);
+    const r = await api('/ai/dynamic-pricing', 'POST', body);
+    const a = r.recommendation || {};
+    const factors = (a.factors || []).map(f => `<tr><td>${escapeHtml(f.name||'')}</td><td>${(f.weight ?? 0)}</td><td>${escapeHtml(f.direction||'')}</td></tr>`).join('');
+    out.innerHTML = `
+      <div class="card"><div class="card-body">
+        <p><strong>Effective CPM:</strong> $${(a.effective_cpm ?? 0).toFixed ? a.effective_cpm.toFixed(2) : a.effective_cpm} (multiplier ${a.multiplier ?? '-'}x of base $${(r.base_cpm ?? base).toFixed(2)})</p>
+        <p><strong>Demand:</strong> ${escapeHtml(a.demand_signal||'-')} · <strong>Supply:</strong> ${escapeHtml(a.supply_signal||'-')} · <strong>Confidence:</strong> ${escapeHtml(a.confidence||'-')}</p>
+        <p><strong>Rationale:</strong> ${escapeHtml(a.rationale||'-')}</p>
+        ${factors ? `<table class="data-table"><thead><tr><th>Factor</th><th>Weight</th><th>Direction</th></tr></thead><tbody>${factors}</tbody></table>` : ''}
+      </div></div>`;
+    showToast('Pricing recommendation ready', 'success');
+  } catch (err) {
+    if (err.status === 503) {
+      out.innerHTML = `<div class="alert alert-error">AI service is unavailable (missing OPENROUTER_API_KEY).</div>`;
+    } else {
+      out.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
+    }
+  }
 }
 
 // ============ TABLE FILTER ============

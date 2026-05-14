@@ -43,6 +43,9 @@
       <button class="btn btn-quick-login btn-block" onclick="quickLogin()">
         <span class="material-icons">bolt</span> Quick Login (Demo)
       </button>
+      <div style="text-align:center;margin-top:1rem;">
+        <a href="#" onclick="event.preventDefault(); showForgotPassword();" style="color:var(--primary,#3b82f6);text-decoration:none;font-size:0.9rem;">Forgot password?</a>
+      </div>
       <p class="login-footer">Secure access to your advertising dashboard</p>
     </div>
   </div>
@@ -88,6 +91,30 @@
         </a>
         <a href="#" class="nav-item" data-section="ai-logs" onclick="navigate('ai-logs')">
           <span class="material-icons">history</span><span class="nav-label">AI Logs</span>
+        </a>
+        <a href="#" class="nav-item" data-section="geofences" onclick="navigate('geofences')">
+          <span class="material-icons">my_location</span><span class="nav-label">Geofences</span>
+        </a>
+        <a href="#" class="nav-item" data-section="brand-safety" onclick="navigate('brand-safety')">
+          <span class="material-icons">verified_user</span><span class="nav-label">Brand Safety</span>
+        </a>
+        <a href="#" class="nav-item" data-section="weather-aware" onclick="navigate('weather-aware')">
+          <span class="material-icons">cloud</span><span class="nav-label">Weather Headlines</span>
+        </a>
+        <a href="#" class="nav-item" data-section="heatmap" onclick="navigate('heatmap')">
+          <span class="material-icons">grid_on</span><span class="nav-label">Heatmap</span>
+        </a>
+        <a href="#" class="nav-item" data-section="live-billboard" onclick="navigate('live-billboard')">
+          <span class="material-icons">live_tv</span><span class="nav-label">Live Billboard</span>
+        </a>
+        <a href="#" class="nav-item" data-section="budget-allocate" onclick="navigate('budget-allocate')">
+          <span class="material-icons">payments</span><span class="nav-label">Budget Allocator</span>
+        </a>
+        <a href="#" class="nav-item" data-section="demand-forecast" onclick="navigate('demand-forecast')">
+          <span class="material-icons">trending_up</span><span class="nav-label">Demand Forecast</span>
+        </a>
+        <a href="#" class="nav-item" data-section="dynamic-pricing" onclick="navigate('dynamic-pricing')">
+          <span class="material-icons">price_change</span><span class="nav-label">Dynamic Pricing</span>
         </a>
       </nav>
     </aside>

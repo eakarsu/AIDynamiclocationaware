@@ -1,18 +1,33 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { authMiddleware } = require('../middleware/auth');
 
-// GET /api/campaigns - list all with headline count
+// All campaign routes require auth
+router.use(authMiddleware);
+
+// GET /api/campaigns - list all with headline count (paginated)
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT c.*, COUNT(h.id)::int AS headline_count
-      FROM campaigns c
-      LEFT JOIN headlines h ON h.campaign_id = c.id
-      GROUP BY c.id
-      ORDER BY c.created_at DESC
-    `);
-    res.json(result.rows);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+    const [dataRes, countRes] = await Promise.all([
+      pool.query(`
+        SELECT c.*, COUNT(h.id)::int AS headline_count
+        FROM campaigns c
+        LEFT JOIN headlines h ON h.campaign_id = c.id
+        GROUP BY c.id
+        ORDER BY c.created_at DESC
+        LIMIT $1 OFFSET $2
+      `, [limit, offset]),
+      pool.query('SELECT COUNT(*) FROM campaigns')
+    ]);
+    const total = parseInt(countRes.rows[0].count);
+    res.json({
+      data: dataRes.rows,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+    });
   } catch (err) {
     console.error('Get campaigns error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -42,11 +57,15 @@ router.get('/:id', async (req, res) => {
 // POST /api/campaigns - create
 router.post('/', async (req, res) => {
   try {
-    const { name, client_name, budget, start_date, end_date, status, target_demographics, target_neighborhoods, description } = req.body;
+    const { name, neighborhood_id, client_name, budget, start_date, end_date, status, target_demographics, target_neighborhoods, description } = req.body;
+    const errors = {};
+    if (!name || (typeof name === 'string' && !name.trim())) errors.name = 'name is required';
+    if (!neighborhood_id) errors.neighborhood_id = 'neighborhood_id is required';
+    if (Object.keys(errors).length > 0) return res.status(400).json({ error: 'Validation failed', errors });
     const result = await pool.query(
       `INSERT INTO campaigns (name, client_name, budget, start_date, end_date, status, target_demographics, target_neighborhoods, description)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [name, client_name, budget, start_date, end_date, status || 'active', target_demographics || null, target_neighborhoods || null, description]
+      [name.trim(), client_name, budget, start_date, end_date, status || 'active', target_demographics || null, target_neighborhoods || null, description]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {

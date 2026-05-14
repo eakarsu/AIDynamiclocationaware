@@ -11,9 +11,14 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(255),
     role VARCHAR(50) DEFAULT 'admin',
     avatar VARCHAR(500),
+    reset_token VARCHAR(255),
+    reset_token_expiry TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expiry TIMESTAMP;
 
 -- ============================================
 -- 2. Trucks
@@ -165,6 +170,25 @@ CREATE TABLE IF NOT EXISTS ai_generation_logs (
 );
 
 -- ============================================
+-- 11. A/B Tests
+-- ============================================
+CREATE TABLE IF NOT EXISTS ab_tests (
+    id SERIAL PRIMARY KEY,
+    campaign_id INT REFERENCES campaigns(id) ON DELETE CASCADE,
+    test_name VARCHAR(255) NOT NULL,
+    headline_a TEXT NOT NULL,
+    headline_b TEXT NOT NULL,
+    impressions_a INT DEFAULT 0,
+    impressions_b INT DEFAULT 0,
+    conversions_a INT DEFAULT 0,
+    conversions_b INT DEFAULT 0,
+    start_date TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
 -- Indexes for performance
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_gps_locations_truck_id ON gps_locations(truck_id);
@@ -178,3 +202,51 @@ CREATE INDEX IF NOT EXISTS idx_analytics_campaign_id ON analytics(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_analytics_date ON analytics(date);
 CREATE INDEX IF NOT EXISTS idx_demographic_data_neighborhood_id ON demographic_data(neighborhood_id);
 CREATE INDEX IF NOT EXISTS idx_ai_generation_logs_campaign_id ON ai_generation_logs(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_ab_tests_campaign_id ON ab_tests(campaign_id);
+
+-- ============================================
+-- 12. Geofences (auto-trigger AI re-generation)
+-- ============================================
+CREATE TABLE IF NOT EXISTS geofences (
+    id SERIAL PRIMARY KEY,
+    neighborhood_id INT REFERENCES neighborhoods(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    center_latitude DECIMAL(10, 8),
+    center_longitude DECIMAL(11, 8),
+    radius_meters INT DEFAULT 500,
+    auto_generate BOOLEAN DEFAULT TRUE,
+    last_triggered_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- 13. Brand-safety scores per headline
+-- ============================================
+CREATE TABLE IF NOT EXISTS brand_safety_scores (
+    id SERIAL PRIMARY KEY,
+    headline_id INT REFERENCES headlines(id) ON DELETE CASCADE,
+    overall_score DECIMAL,
+    risk_level VARCHAR(50),
+    issues JSONB,
+    ai_results JSONB,
+    raw_response TEXT,
+    model VARCHAR(255),
+    tokens_used INT,
+    latency_ms INT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================
+-- 14. Weather-aware contexts (cached)
+-- ============================================
+CREATE TABLE IF NOT EXISTS weather_contexts (
+    id SERIAL PRIMARY KEY,
+    neighborhood_id INT REFERENCES neighborhoods(id) ON DELETE CASCADE,
+    weather_summary TEXT,
+    weather_data JSONB,
+    fetched_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_geofences_neighborhood_id ON geofences(neighborhood_id);
+CREATE INDEX IF NOT EXISTS idx_brand_safety_headline_id ON brand_safety_scores(headline_id);
+CREATE INDEX IF NOT EXISTS idx_weather_contexts_neighborhood_id ON weather_contexts(neighborhood_id);

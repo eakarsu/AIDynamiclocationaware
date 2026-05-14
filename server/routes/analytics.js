@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { authMiddleware } = require('../middleware/auth');
+
+router.use(authMiddleware);
 
 // GET /api/analytics/summary - aggregate stats (must be before /:id)
 router.get('/summary', async (req, res) => {

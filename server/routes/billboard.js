@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { authMiddleware, optionalAuth } = require('../middleware/auth');
+
+// Use optionalAuth - billboard display devices may not be authenticated users
+router.use(optionalAuth);
 
 // GET /api/billboard - list all displays with truck/headline info
 router.get('/', async (req, res) => {
