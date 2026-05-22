@@ -96,6 +96,7 @@ function navigate(section, id = null) {
     heatmap: 'Heatmap', 'live-billboard': 'Live Billboard',
     'budget-allocate': 'Budget Allocator', 'demand-forecast': 'Demand Forecast',
     'dynamic-pricing': 'Dynamic Pricing',
+    'route-arbitrage': 'Route Impression Arbitrage',
   };
   document.getElementById('topbar-title').textContent = titles[section] || section;
   const content = document.getElementById('content');
@@ -121,6 +122,7 @@ function navigate(section, id = null) {
     'budget-allocate': renderBudgetAllocate,
     'demand-forecast': renderDemandForecast,
     'dynamic-pricing': renderDynamicPricing,
+    'route-arbitrage': renderRouteArbitrage,
   };
 
   const render = renderers[section];
@@ -2086,6 +2088,18 @@ async function runDynamicPricing() {
     } else {
       out.innerHTML = `<div class="alert alert-error">${escapeHtml(err.message)}</div>`;
     }
+  }
+}
+
+async function renderRouteArbitrage() {
+  const content = document.getElementById('content');
+  try {
+    const data = await api('/route-impression-arbitrage');
+    const cards = Object.entries(data.summary || {}).map(([k, v]) => `<div class="stat-card"><div class="stat-label">${escapeHtml(k.replaceAll('_', ' '))}</div><div class="stat-value">${escapeHtml(v)}</div></div>`).join('');
+    const rows = (data.routes || []).map(r => `<tr><td>${escapeHtml(r.route)}</td><td>$${escapeHtml(r.cpm)}</td><td>${formatNumber(r.impressions)}</td><td>${escapeHtml(r.action)}</td></tr>`).join('');
+    content.innerHTML = `<div class="section-header"><h2>Route Impression Arbitrage</h2></div><div class="stats-grid">${cards}</div><div class="card"><div class="card-body"><table class="data-table"><thead><tr><th>Route</th><th>CPM</th><th>Impressions</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  } catch (err) {
+    content.innerHTML = emptyState('error', 'Error', err.message);
   }
 }
 

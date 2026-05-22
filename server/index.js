@@ -53,6 +53,7 @@ app.use('/api/weather-triggered', require('./routes/weatherTriggered'));
 app.use('/api/fleet-dashboard', require('./routes/fleetDashboard'));
 app.use('/api/inventory-marketplace', require('./routes/inventoryMarketplace'));
 app.use('/api/audio-ad-generator', require('./routes/audioAdGenerator'));
+app.use('/api/route-impression-arbitrage', require('./routes/routeImpressionArbitrage'));
 
 // Health check
 app.get('/api/health', (req, res) => {
