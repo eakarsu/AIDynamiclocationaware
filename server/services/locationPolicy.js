@@ -1,0 +1,10 @@
+const crypto=require('crypto');
+const SENSITIVE_PLACES=new Set(['healthcare','religious','addiction_treatment','shelter','school','correctional','political_event']);
+
+function pseudonymizeSubject(subjectRef,secret){if(!subjectRef||!secret)throw new Error('subjectRef and secret are required');return crypto.createHmac('sha256',secret).update(String(subjectRef)).digest('hex');}
+function quantizeCoordinate(value,kind,decimals=3){const numeric=Number(value);const limit=kind==='latitude'?90:180;if(!Number.isFinite(numeric)||numeric < -limit||numeric > limit)throw new Error(`Invalid ${kind}`);if(decimals<2||decimals>3)throw new Error('Only coarse 2-3 decimal location precision is permitted');const factor=10**decimals;return Math.round(numeric*factor)/factor;}
+function isSensitivePlace(category){return SENSITIVE_PLACES.has(String(category||'').toLowerCase());}
+function consentIsActive(events,at=new Date()){const eligible=events.filter(event=>new Date(event.occurred_at)<=at).sort((a,b)=>new Date(a.occurred_at)-new Date(b.occurred_at));return eligible.length>0&&eligible.at(-1).action==='granted'&&new Date(eligible.at(-1).expires_at)>at;}
+function enforceContext({recordedAt,placeCategory,now=new Date(),maxAgeSeconds=300}){const recorded=new Date(recordedAt);if(Number.isNaN(recorded.getTime()))throw new Error('recordedAt must be an ISO timestamp');if((now-recorded)/1000>maxAgeSeconds)throw new Error('Location context is stale');if(recorded>now)throw new Error('Location context cannot be in the future');if(isSensitivePlace(placeCategory))throw new Error('Targeting at sensitive places is prohibited');return true;}
+function selectCreative(creatives,context){const eligible=creatives.filter(c=>c.status==='approved'&&(!c.required_context_tags?.length||c.required_context_tags.every(tag=>(context.tags||[]).includes(tag))));return eligible.sort((a,b)=>String(a.id).localeCompare(String(b.id)))[0]||null;}
+module.exports={SENSITIVE_PLACES,pseudonymizeSubject,quantizeCoordinate,isSensitivePlace,consentIsActive,enforceContext,selectCreative};

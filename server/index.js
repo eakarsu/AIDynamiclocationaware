@@ -5,6 +5,9 @@ const helmet = require('helmet');
 const path = require('path');
 const http = require('http');
 const { createWsBroker } = require('./services/wsBroker');
+const { validateRuntime } = require('./config/runtime');
+
+validateRuntime();
 
 const app = express();
 
@@ -21,19 +24,29 @@ const allowedOrigins = (process.env.CORS_ORIGINS || '')
   .map((s) => s.trim())
   .filter(Boolean);
 app.use(cors({
-  origin: allowedOrigins.length === 0
-    ? true // same-origin only when no CORS_ORIGINS set; cors() with true echoes request origin
-    : (allowedOrigins.includes('*') ? true : allowedOrigins),
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS: origin not allowed'));
+  },
   credentials: true,
 }));
 
 app.use(express.json({ limit: '10mb' }));
+
+app.use('/api', (req,res,next) => {
+  const supported=['/auth','/governed-delivery','/health'];
+  if(supported.some(prefix=>req.path.startsWith(prefix))) return next();
+  if(process.env.ENABLE_LEGACY_AD_SURFACES==='true'&&process.env.NODE_ENV!=='production') return next();
+  return res.status(404).json({error:'Legacy generated endpoint is outside the consent-governed product boundary'});
+});
 
 // Serve static files from public directory
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Mount route files
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/governed-delivery', require('./routes/governedDelivery'));
 app.use('/api/trucks', require('./routes/trucks'));
 app.use('/api/gps', require('./routes/gps'));
 app.use('/api/neighborhoods', require('./routes/neighborhoods'));
@@ -69,7 +82,9 @@ const PORT = process.env.API_PORT || 4001;
 
 // Wrap in HTTP server so WebSocket can share the port
 const server = http.createServer(app);
-const wsBroker = createWsBroker(server);
+const wsBroker = process.env.ENABLE_LEGACY_AD_SURFACES === 'true' && process.env.NODE_ENV !== 'production'
+  ? createWsBroker(server)
+  : { broadcast: () => {}, clientCount: () => 0, wss: null };
 app.set('wsBroker', wsBroker);
 
 server.listen(PORT, () => {
@@ -77,14 +92,6 @@ server.listen(PORT, () => {
   console.log(`  ─────────────────────────────────────────`);
   console.log(`  App:  http://localhost:${PORT}`);
   console.log(`  API:  http://localhost:${PORT}/api`);
-  console.log(`  WS:   ws://localhost:${PORT}/ws`);
+  console.log(`  WS:   ${wsBroker.wss ? `ws://localhost:${PORT}/ws` : 'disabled'}`);
   console.log(`  Env:  ${process.env.NODE_ENV || 'development'}\n`);
 });
-
-
-// === Batch 03 Gaps & Frontend Mounts ===
-try {
-  const _batch03 = require('./routes/batch03Gaps');
-  if (typeof authenticateToken === 'function') app.use('/api', authenticateToken, _batch03);
-  else app.use('/api', _batch03);
-} catch (_e) { /* batch03 gap routes optional */ }

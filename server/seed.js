@@ -4,6 +4,10 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+if (process.env.CONFIRM_DEMO_SEED !== 'yes') {
+  throw new Error('Refusing destructive seed without CONFIRM_DEMO_SEED=yes');
+}
+
 // ============================================
 // Colored console helpers
 // ============================================
@@ -39,12 +43,12 @@ function logTitle(msg) {
 // ============================================
 // Database config
 // ============================================
-const DB_NAME = process.env.DB_NAME || 'dynamic_ads';
+const DB_NAME = process.env.DB_NAME;
 const baseConfig = {
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST,
   port: process.env.DB_PORT || 5432,
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
 };
 
 // ============================================

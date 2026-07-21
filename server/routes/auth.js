@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const pool = require('../db');
 const { authMiddleware, generateToken } = require('../middleware/auth');
 
@@ -55,9 +54,9 @@ router.get('/me', authMiddleware, async (req, res) => {
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, name, role } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    const { email, password, name } = req.body;
+    if (!email || !password || String(password).length < 12) {
+      return res.status(400).json({ error: 'Email and password of at least 12 characters are required' });
     }
 
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
@@ -68,7 +67,7 @@ router.post('/register', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
       'INSERT INTO users (email, password, name, role) VALUES ($1, $2, $3, $4) RETURNING id, email, name, role, created_at',
-      [email, hashedPassword, name || null, role || 'admin']
+      [email, hashedPassword, name || null, 'viewer']
     );
 
     const user = result.rows[0];
@@ -82,31 +81,7 @@ router.post('/register', async (req, res) => {
 
 // POST /api/auth/forgot-password - generate reset token
 router.post('/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
-
-    const userRes = await pool.query('SELECT id, email FROM users WHERE email = $1', [email]);
-    // Always respond 200 to avoid leaking whether email exists
-    if (userRes.rows.length === 0) {
-      return res.json({ message: 'If an account exists, a reset link has been generated.' });
-    }
-    const token = crypto.randomBytes(32).toString('hex');
-    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-    await pool.query(
-      'UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3',
-      [token, expiry, userRes.rows[0].id]
-    );
-    // In a real app this would be emailed; for demo we return token directly
-    res.json({
-      message: 'If an account exists, a reset link has been generated.',
-      reset_token: token,
-      expires_at: expiry,
-    });
-  } catch (err) {
-    console.error('Forgot password error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+  res.status(503).json({ error: 'Password-reset delivery is not configured; contact an authorized administrator.' });
 });
 
 // POST /api/auth/reset-password - consume reset token
@@ -114,7 +89,7 @@ router.post('/reset-password', async (req, res) => {
   try {
     const { token, new_password } = req.body;
     if (!token || !new_password) return res.status(400).json({ error: 'token and new_password are required' });
-    if (String(new_password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (String(new_password).length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters' });
 
     const userRes = await pool.query(
       'SELECT id FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW()',
@@ -142,7 +117,7 @@ router.post('/change-password', authMiddleware, async (req, res) => {
     if (!current_password || !new_password) {
       return res.status(400).json({ error: 'current_password and new_password are required' });
     }
-    if (String(new_password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (String(new_password).length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters' });
 
     const userRes = await pool.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });

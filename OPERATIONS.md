@@ -1,0 +1,7 @@
+# Consent-governed delivery operations
+
+Run `scripts/bootstrap.sh`, configure `.env`, then apply `scripts/migrate.sh`. `start.sh` does not install, start PostgreSQL, seed, migrate, or kill ports. The demo seed is separately guarded. Public registration creates only a `viewer`; default JWT and database credentials and reset-token disclosure were removed. The unauthenticated generated WebSocket and legacy campaign/model APIs are disabled by default and forbidden in production.
+
+`/api/governed-delivery` provides workspace roles, append-only consent grants/revocations, pseudonymous subjects, 2–3 decimal coordinate minimization with 15-minute expiry, sensitive-place prohibitions, privacy-reviewed campaigns and creatives, deterministic selection, frequency caps, idempotent delivery events, and audit records. Exact coordinates and raw subject identifiers are neither stored nor returned.
+
+No CMP, geospatial, ad-server, campaign, analytics, attribution, or billing connector is represented as live. Those integrations require contracts, purpose/scope mapping, deletion and opt-out propagation, retries/reconciliation, provider failure handling, and privacy/security review. Geofence accuracy, noisy/stale signals, attribution, latency, fairness, accessibility, consent revocation races, retention purge jobs, billing controls, and regional advertising/privacy law validation remain launch gates. Sensitive-place or inferred-sensitive targeting is prohibited.
