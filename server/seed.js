@@ -106,9 +106,13 @@ async function seed() {
   // ------------------------------------------
   logStep('Seeding users...');
   try {
-    const hashedPw = await bcrypt.hash('password123', 10);
+    const demoEmail = process.env.DEMO_EMAIL || '';
+    const demoPassword = process.env.DEMO_PASSWORD || '';
+    if (!demoEmail.includes('@')) throw new Error('DEMO_EMAIL must be a valid email address');
+    if (demoPassword.length < 12) throw new Error('DEMO_PASSWORD must be at least 12 characters');
+    const hashedPw = await bcrypt.hash(demoPassword, 10);
     const users = [
-      ['admin@dynamicads.com', hashedPw, 'Admin User', 'admin', 'https://ui-avatars.com/api/?name=Admin+User&background=6366f1&color=fff'],
+      [demoEmail, hashedPw, 'Admin User', 'admin', 'https://ui-avatars.com/api/?name=Admin+User&background=6366f1&color=fff'],
       ['manager@dynamicads.com', hashedPw, 'Campaign Manager', 'manager', 'https://ui-avatars.com/api/?name=Campaign+Manager&background=22c55e&color=fff'],
       ['viewer@dynamicads.com', hashedPw, 'Data Viewer', 'viewer', 'https://ui-avatars.com/api/?name=Data+Viewer&background=f59e0b&color=fff'],
     ];

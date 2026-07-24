@@ -104,7 +104,14 @@ if (FRONTEND_PORT && String(FRONTEND_PORT) !== String(PORT)) {
   frontendApp.get('/runtime-config.js', (_req, res) => {
     res.type('application/javascript').send(
       `window.API_BASE=${JSON.stringify(`http://${HOST}:${PORT}`)};` +
-      `window.WS_BASE=${JSON.stringify(`ws://${HOST}:${PORT}`)};`
+      `window.WS_BASE=${JSON.stringify(`ws://${HOST}:${PORT}`)};` +
+      `window.DEMO_CREDENTIALS=${JSON.stringify(
+        process.env.NODE_ENV !== 'production'
+          && process.env.ENABLE_DEMO_CREDENTIAL_AUTOFILL !== 'false'
+          && process.env.DEMO_EMAIL && process.env.DEMO_PASSWORD
+          ? { email: process.env.DEMO_EMAIL, password: process.env.DEMO_PASSWORD }
+          : null
+      )};`
     );
   });
   frontendApp.use(express.static(path.join(__dirname, '..', 'public')));

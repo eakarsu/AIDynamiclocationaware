@@ -170,8 +170,13 @@ async function handleLogin() {
 }
 
 function quickLogin() {
-  document.getElementById('login-email').value = 'admin@dynamicads.com';
-  document.getElementById('login-password').value = 'password123';
+  const credentials = window.DEMO_CREDENTIALS;
+  if (!credentials) {
+    showToast('Demo credentials are unavailable.', 'error');
+    return;
+  }
+  document.getElementById('login-email').value = credentials.email;
+  document.getElementById('login-password').value = credentials.password;
   handleLogin();
 }
 
