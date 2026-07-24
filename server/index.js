@@ -79,6 +79,8 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.API_PORT || 4001;
+const FRONTEND_PORT = process.env.FRONTEND_PORT;
+const HOST = process.env.HOST || '127.0.0.1';
 
 // Wrap in HTTP server so WebSocket can share the port
 const server = http.createServer(app);
@@ -87,7 +89,7 @@ const wsBroker = process.env.ENABLE_LEGACY_AD_SURFACES === 'true' && process.env
   : { broadcast: () => {}, clientCount: () => 0, wss: null };
 app.set('wsBroker', wsBroker);
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`\n  Dynamic Location-Aware Advertising Platform`);
   console.log(`  ─────────────────────────────────────────`);
   console.log(`  App:  http://localhost:${PORT}`);
@@ -95,3 +97,21 @@ server.listen(PORT, () => {
   console.log(`  WS:   ${wsBroker.wss ? `ws://localhost:${PORT}/ws` : 'disabled'}`);
   console.log(`  Env:  ${process.env.NODE_ENV || 'development'}\n`);
 });
+
+if (FRONTEND_PORT && String(FRONTEND_PORT) !== String(PORT)) {
+  const frontendApp = express();
+  frontendApp.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+  frontendApp.get('/runtime-config.js', (_req, res) => {
+    res.type('application/javascript').send(
+      `window.API_BASE=${JSON.stringify(`http://${HOST}:${PORT}`)};` +
+      `window.WS_BASE=${JSON.stringify(`ws://${HOST}:${PORT}`)};`
+    );
+  });
+  frontendApp.use(express.static(path.join(__dirname, '..', 'public')));
+  frontendApp.get('*', (_req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  });
+  frontendApp.listen(FRONTEND_PORT, HOST, () => {
+    console.log(`  UI:   http://${HOST}:${FRONTEND_PORT}`);
+  });
+}
