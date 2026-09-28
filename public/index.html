@@ -35,13 +35,13 @@
             <input type="password" id="login-password" placeholder="Enter your password" required>
           </div>
         </div>
-        <button type="submit" class="btn btn-primary btn-block" id="login-btn">
+        <button type="submit" class="btn btn-primary btn-block" id="login-btn" aria-label="Sign In">
           <span class="material-icons">login</span> Sign In
         </button>
       </form>
       <div class="login-divider"><span>or</span></div>
-      <button class="btn btn-quick-login btn-block" onclick="quickLogin()">
-        <span class="material-icons">bolt</span> Quick Login (Demo)
+      <button class="btn btn-quick-login btn-block" onclick="quickLogin()" aria-label="Auto Fill Demo Credentials">
+        <span class="material-icons">bolt</span> Auto Fill Demo Credentials
       </button>
       <div style="text-align:center;margin-top:1rem;">
         <a href="#" onclick="event.preventDefault(); showForgotPassword();" style="color:var(--primary,#3b82f6);text-decoration:none;font-size:0.9rem;">Forgot password?</a>

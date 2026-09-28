@@ -177,7 +177,6 @@ function quickLogin() {
   }
   document.getElementById('login-email').value = credentials.email;
   document.getElementById('login-password').value = credentials.password;
-  handleLogin();
 }
 
 function logout() {
